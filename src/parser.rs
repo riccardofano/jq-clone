@@ -15,6 +15,7 @@ enum Token<'a> {
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {peek(any);
         '.' => alt((
+            terminated(preceded('.', parse_key), '?').map(Token::OptionalKey),
             preceded('.', parse_key.map(Token::Key)),
             take(1usize).value(Token::Identity)
         ))
@@ -41,7 +42,7 @@ fn parse_key_string<'a>(input: &mut &'a str) -> PResult<&'a str> {
 }
 
 fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
-    take_till(1.., |c: char| c == '.' || c == '[' || c == '"')
+    take_till(1.., |c: char| c == '.' || c == '[' || c == '"' || c == '?')
         .recognize()
         .parse_next(input)
 }
@@ -223,6 +224,31 @@ mod tests {
         let mut input = ".quote.quote";
         let output = parse_token.parse_next(&mut input).unwrap();
         assert_eq!(output, Token::Key("quote"));
+        assert_eq!(input, ".quote");
+    }
+
+    #[test]
+    fn parse_optional_key_dot_notation() {
+        let mut input = ".quote?";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalKey("quote"));
+        assert_eq!(input, "");
+    }
+
+    #[test]
+    fn parse_optional_key_dot_notation_stops_at_open_bracket() {
+        // TODO: This might not be valid syntax
+        let mut input = ".quote?[]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalKey("quote"));
+        assert_eq!(input, "[]");
+    }
+
+    #[test]
+    fn parse_optional_key_dot_notation_stops_at_dot() {
+        let mut input = ".quote?.quote";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalKey("quote"));
         assert_eq!(input, ".quote");
     }
 }
