@@ -1,6 +1,6 @@
-use winnow::ascii::{alpha1, digit1};
-use winnow::combinator::{alt, delimited, dispatch, fail, peek, preceded, terminated};
-use winnow::token::{any, take, take_till, take_while};
+use winnow::ascii::digit1;
+use winnow::combinator::{alt, delimited, dispatch, fail, terminated};
+use winnow::token::{any, take_till};
 use winnow::{PResult, Parser};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,21 +10,22 @@ enum Token<'a> {
     Key(&'a str),
     OptionalIndex(usize),
     OptionalKey(&'a str),
+    Iterator,
 }
 
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
-    dispatch! {peek(any);
+    dispatch! {any;
         '.' => alt((
-            terminated(preceded('.', parse_key), '?').map(Token::OptionalKey),
-            preceded('.', parse_key.map(Token::Key)),
-            take(1usize).value(Token::Identity)
-        ))
-        ,
+            terminated(parse_key, '?').map(Token::OptionalKey),
+            parse_key.map(Token::Key),
+            "".value(Token::Identity)
+        )),
         '[' => alt((
             terminated(parse_index, '?').map(Token::OptionalIndex),
             parse_index.map(Token::Index),
             terminated(parse_key_string, '?').map(Token::OptionalKey) ,
-            parse_key_string.map(Token::Key)
+            parse_key_string.map(Token::Key),
+            "]".value(Token::Iterator)
         )),
         _ => fail
     }
@@ -32,13 +33,13 @@ fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
 }
 
 fn parse_index(input: &mut &str) -> PResult<usize> {
-    delimited('[', digit1, ']')
+    terminated(digit1, ']')
         .try_map(str::parse)
         .parse_next(input)
 }
 
 fn parse_key_string<'a>(input: &mut &'a str) -> PResult<&'a str> {
-    delimited('[', delimited('"', parse_key, '"'), ']').parse_next(input)
+    terminated(delimited('"', parse_key, '"'), ']').parse_next(input)
 }
 
 fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
@@ -250,5 +251,16 @@ mod tests {
         let output = parse_token.parse_next(&mut input).unwrap();
         assert_eq!(output, Token::OptionalKey("quote"));
         assert_eq!(input, ".quote");
+    }
+
+    #[test]
+    fn parse_iterator_token() {
+        let mut input = ".quote[]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("quote"));
+
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Iterator);
+        assert!(input.is_empty());
     }
 }
