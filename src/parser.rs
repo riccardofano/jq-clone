@@ -1,5 +1,5 @@
 use winnow::ascii::{alpha1, digit1};
-use winnow::combinator::{delimited, dispatch, fail, peek};
+use winnow::combinator::{alt, delimited, dispatch, fail, peek};
 use winnow::token::{any, take, take_till, take_while};
 use winnow::{PResult, Parser};
 
@@ -13,7 +13,7 @@ enum Token<'a> {
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {peek(any);
         '.' => take(1usize).value(Token::Identity),
-        '[' => parse_index.map(Token::Index),
+        '[' => alt(( parse_index.map(Token::Index), parse_key_string.map(Token::Key) )),
         _ => fail
     }
     .parse_next(input)
@@ -23,6 +23,10 @@ fn parse_index(input: &mut &str) -> PResult<usize> {
     delimited('[', digit1, ']')
         .try_map(str::parse)
         .parse_next(input)
+}
+
+fn parse_key_string<'a>(input: &mut &'a str) -> PResult<&'a str> {
+    delimited('[', delimited('"', parse_key, '"'), ']').parse_next(input)
 }
 
 fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
@@ -40,21 +44,55 @@ mod tests {
     fn parse_identity_token() {
         let mut input = ".";
         let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Identity)
+        assert_eq!(output, Token::Identity);
+        assert!(input.is_empty());
     }
 
     #[test]
     fn parse_single_digit_index_token() {
         let mut input = "[1]";
         let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Index(1))
+        assert_eq!(output, Token::Index(1));
+        assert!(input.is_empty());
     }
 
     #[test]
     fn parse_multiple_digit_index_token() {
         let mut input = "[5280]";
         let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Index(5280))
+        assert_eq!(output, Token::Index(5280));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_key_array_index() {
+        let mut input = "[\"key\"]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("key"));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_key_array_index_with_digits() {
+        let mut input = "[\"key123\"]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("key123"));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_key_array_index_with_digits_prefixed() {
+        let mut input = "[\"123key\"]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("123key"));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn array_key_index_without_quotes() {
+        let mut input = "[key]";
+        let output = parse_token.parse_next(&mut input);
+        assert!(output.is_err());
     }
 
     #[test]
