@@ -1,15 +1,16 @@
-use winnow::ascii::digit1;
+use winnow::ascii::{alpha1, digit1};
 use winnow::combinator::{delimited, dispatch, fail, peek};
-use winnow::token::{any, take};
+use winnow::token::{any, take, take_till, take_while};
 use winnow::{PResult, Parser};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Token {
+enum Token<'a> {
     Identity,
     Index(usize),
+    Key(&'a str),
 }
 
-fn parse_token(input: &mut &str) -> PResult<Token> {
+fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {peek(any);
         '.' => take(1usize).value(Token::Identity),
         '[' => parse_index.map(Token::Index),
@@ -21,6 +22,12 @@ fn parse_token(input: &mut &str) -> PResult<Token> {
 fn parse_index(input: &mut &str) -> PResult<usize> {
     delimited('[', digit1, ']')
         .try_map(str::parse)
+        .parse_next(input)
+}
+
+fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
+    take_till(1.., |c: char| c == '.' || c == '[' || c == '"')
+        .recognize()
         .parse_next(input)
 }
 
@@ -48,5 +55,69 @@ mod tests {
         let mut input = "[5280]";
         let output = parse_token.parse_next(&mut input).unwrap();
         assert_eq!(output, Token::Index(5280))
+    }
+
+    #[test]
+    fn key_is_one_letter() {
+        let mut input = "a";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_two_letter() {
+        let mut input = "ab";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "ab");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_one_letter_one_digit() {
+        let mut input = "a1";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a1");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_one_letter_one_underscore() {
+        let mut input = "a_";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a_");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_one_letter_multiple_digits() {
+        let mut input = "a1034803141";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a1034803141");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_one_letter_multiple_underscores() {
+        let mut input = "a________";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a________");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_underscore_separated() {
+        let mut input = "a_b_c_1_2";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "a_b_c_1_2");
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn key_is_unicode_characters() {
+        let mut input = "🎉🎆✨";
+        let output = parse_key.parse_next(&mut input).unwrap();
+        assert_eq!(output, "🎉🎆✨");
+        assert!(input.is_empty());
     }
 }
