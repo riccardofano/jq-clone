@@ -1,5 +1,5 @@
 use winnow::ascii::{alpha1, digit1};
-use winnow::combinator::{alt, delimited, dispatch, fail, peek, terminated};
+use winnow::combinator::{alt, delimited, dispatch, fail, peek, preceded, terminated};
 use winnow::token::{any, take, take_till, take_while};
 use winnow::{PResult, Parser};
 
@@ -14,7 +14,11 @@ enum Token<'a> {
 
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {peek(any);
-        '.' => take(1usize).value(Token::Identity),
+        '.' => alt((
+            preceded('.', parse_key.map(Token::Key)),
+            take(1usize).value(Token::Identity)
+        ))
+        ,
         '[' => alt((
             terminated(parse_index, '?').map(Token::OptionalIndex),
             parse_index.map(Token::Index),
@@ -196,5 +200,29 @@ mod tests {
         let output = parse_key.parse_next(&mut input).unwrap();
         assert_eq!(output, "🎉🎆✨");
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_key_dot_notation() {
+        let mut input = ".quote";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("quote"));
+        assert_eq!(input, "");
+    }
+
+    #[test]
+    fn parse_key_dot_notation_stops_at_open_bracket() {
+        let mut input = ".quote[]";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("quote"));
+        assert_eq!(input, "[]");
+    }
+
+    #[test]
+    fn parse_key_dot_notation_stops_at_dot() {
+        let mut input = ".quote.quote";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::Key("quote"));
+        assert_eq!(input, ".quote");
     }
 }
