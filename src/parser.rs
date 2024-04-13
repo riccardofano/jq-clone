@@ -1,5 +1,5 @@
 use winnow::ascii::{alpha1, digit1};
-use winnow::combinator::{alt, delimited, dispatch, fail, peek};
+use winnow::combinator::{alt, delimited, dispatch, fail, peek, terminated};
 use winnow::token::{any, take, take_till, take_while};
 use winnow::{PResult, Parser};
 
@@ -8,12 +8,19 @@ enum Token<'a> {
     Identity,
     Index(usize),
     Key(&'a str),
+    OptionalIndex(usize),
+    OptionalKey(&'a str),
 }
 
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {peek(any);
         '.' => take(1usize).value(Token::Identity),
-        '[' => alt(( parse_index.map(Token::Index), parse_key_string.map(Token::Key) )),
+        '[' => alt((
+            terminated(parse_index, '?').map(Token::OptionalIndex),
+            parse_index.map(Token::Index),
+            terminated(parse_key_string, '?').map(Token::OptionalKey) ,
+            parse_key_string.map(Token::Key)
+        )),
         _ => fail
     }
     .parse_next(input)
@@ -65,6 +72,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_single_digit_optional_index_token() {
+        let mut input = "[1]?";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalIndex(1));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_multiple_digit_optional_index_token() {
+        let mut input = "[5280]?";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalIndex(5280));
+        assert!(input.is_empty());
+    }
+
+    #[test]
     fn parse_key_array_index() {
         let mut input = "[\"key\"]";
         let output = parse_token.parse_next(&mut input).unwrap();
@@ -85,6 +108,22 @@ mod tests {
         let mut input = "[\"123key\"]";
         let output = parse_token.parse_next(&mut input).unwrap();
         assert_eq!(output, Token::Key("123key"));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_optional_key_array_index() {
+        let mut input = "[\"key\"]?";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalKey("key"));
+        assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_optional_key_array_index_with_digits() {
+        let mut input = "[\"key123\"]?";
+        let output = parse_token.parse_next(&mut input).unwrap();
+        assert_eq!(output, Token::OptionalKey("key123"));
         assert!(input.is_empty());
     }
 
