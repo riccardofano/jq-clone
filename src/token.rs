@@ -1,4 +1,4 @@
-use anyhow::bail;
+use anyhow::{bail, Context};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -11,10 +11,16 @@ pub(crate) enum Token<'a> {
     Iterator,
 }
 
-fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Value> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Output {
+    Single(Value),
+    Multiple(Vec<Output>),
+}
+
+fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Output> {
     let mut output = input;
 
-    for token in tokens {
+    for (i, token) in tokens.iter().enumerate() {
         match token {
             Token::Identity => {}
             Token::Index(_) if !output.is_array() => {
@@ -29,11 +35,29 @@ fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Value> {
             Token::Key(key) | Token::OptionalKey(key) => {
                 output = output.get(key).unwrap_or(&Value::Null);
             }
-            Token::Iterator => todo!(),
+            Token::Iterator => match output {
+                Value::Array(array) => {
+                    let transformed = array
+                        .iter()
+                        .map(|v| apply_tokens(v, &tokens[i + 1..]))
+                        .collect::<Result<Vec<Output>, _>>()?;
+
+                    return Ok(Output::Multiple(transformed));
+                }
+                Value::Object(_) => todo!(),
+                _ => return Ok(Output::Single(output.to_owned())),
+            },
         }
     }
 
-    Ok(output.to_owned())
+    Ok(Output::Single(output.to_owned()))
+}
+
+fn print_output(output: Output) {
+    match output {
+        Output::Single(v) => println!("{v}"),
+        Output::Multiple(values) => values.into_iter().for_each(print_output),
+    }
 }
 
 #[cfg(test)]
@@ -47,7 +71,10 @@ mod tests {
         let input = json!({"quotes": ["a", "b", "c"]});
         let tokens = vec![Token::Identity];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), input);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(input)
+        );
     }
 
     #[test]
@@ -55,7 +82,10 @@ mod tests {
         let input = json!([1, 2, 3]);
         let tokens = vec![Token::Index(2)];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 3);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!(3))
+        );
     }
 
     #[test]
@@ -63,7 +93,10 @@ mod tests {
         let input = json!([1, 2, 3]);
         let tokens = vec![Token::Index(3)];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
     }
 
     #[test]
@@ -83,7 +116,10 @@ mod tests {
         let input = json!([[1, 2, 3], [4, 5, 6]]);
         let tokens = vec![Token::Index(1), Token::Index(0)];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 4);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!(4))
+        );
     }
 
     #[test]
@@ -91,7 +127,10 @@ mod tests {
         let input = json!([[1, 2, 3], [4, 5, 6]]);
         let tokens = vec![Token::Index(1), Token::Identity, Token::Index(0)];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 4);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!(4))
+        );
     }
 
     #[test]
@@ -99,7 +138,10 @@ mod tests {
         let input = json!({"hello": "world"});
         let tokens = vec![Token::Key("hello")];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), "world");
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!("world"))
+        );
     }
 
     #[test]
@@ -107,7 +149,10 @@ mod tests {
         let input = json!({"hello": "world"});
         let tokens = vec![Token::Key("missing")];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
     }
 
     #[test]
@@ -127,7 +172,10 @@ mod tests {
         let input = json!({"hello": {"world": 42}});
         let tokens = vec![Token::Key("hello"), Token::Key("world")];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 42);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!(42))
+        );
     }
 
     #[test]
@@ -135,7 +183,10 @@ mod tests {
         let input = json!({"key": [1,2,3]});
         let tokens = vec![Token::Key("key"), Token::Index(0)];
 
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 1);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(json!(1))
+        );
     }
 
     #[test]
@@ -143,11 +194,20 @@ mod tests {
         let tokens = vec![Token::OptionalIndex(1)];
 
         let input = json!("1");
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
         let input = json!(1);
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
         let input = json!({"hello": "world"});
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
     }
 
     #[test]
@@ -155,10 +215,83 @@ mod tests {
         let tokens = vec![Token::OptionalKey("hello")];
 
         let input = json!("1");
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
         let input = json!(1);
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
         let input = json!([1, 2, 3, 4]);
-        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        assert_eq!(
+            apply_tokens(&input, &tokens).unwrap(),
+            Output::Single(Value::Null)
+        );
+    }
+
+    #[test]
+    fn apply_iterator() {
+        let tokens = vec![Token::Iterator];
+
+        let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
+        let res = apply_tokens(&input, &tokens).unwrap();
+
+        let expected = Output::Multiple(vec![
+            Output::Single(json!([1, [2, 3]])),
+            Output::Single(json!([4, [5, 6]])),
+            Output::Single(json!([7, [8, 9]])),
+        ]);
+
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn apply_iterator_chained() {
+        let tokens = vec![Token::Iterator, Token::Iterator];
+
+        let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
+        let res = apply_tokens(&input, &tokens).unwrap();
+
+        let expected = Output::Multiple(vec![
+            Output::Multiple(vec![
+                Output::Single(json!(1)),
+                Output::Single(json!([2, 3])),
+            ]),
+            Output::Multiple(vec![
+                Output::Single(json!(4)),
+                Output::Single(json!([5, 6])),
+            ]),
+            Output::Multiple(vec![
+                Output::Single(json!(7)),
+                Output::Single(json!([8, 9])),
+            ]),
+        ]);
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn apply_iterator_chained_twice() {
+        let tokens = vec![Token::Iterator, Token::Iterator, Token::Iterator];
+
+        let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
+        let res = apply_tokens(&input, &tokens).unwrap();
+
+        let expected = Output::Multiple(vec![
+            Output::Multiple(vec![
+                Output::Single(json!(1)),
+                Output::Multiple(vec![Output::Single(json!(2)), Output::Single(json!(3))]),
+            ]),
+            Output::Multiple(vec![
+                Output::Single(json!(4)),
+                Output::Multiple(vec![Output::Single(json!(5)), Output::Single(json!(6))]),
+            ]),
+            Output::Multiple(vec![
+                Output::Single(json!(7)),
+                Output::Multiple(vec![Output::Single(json!(8)), Output::Single(json!(9))]),
+            ]),
+        ]);
+        assert_eq!(res, expected);
     }
 }
