@@ -74,6 +74,7 @@ pub fn token_output_to_string(output: Output) -> anyhow::Result<String> {
     Ok(string)
 }
 
+#[allow(dead_code)]
 pub fn print_output(output: Output) {
     match output {
         Output::Single(v) => println!("{v}"),
