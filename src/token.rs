@@ -20,17 +20,15 @@ fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Value> {
             Token::Index(_) if !output.is_array() => {
                 bail!("Can't index into non array value");
             }
-            Token::Index(index) => {
+            Token::Index(index) | Token::OptionalIndex(index) => {
                 output = output.get(index).unwrap_or(&Value::Null);
             }
-            Token::OptionalIndex(_) => todo!(),
             Token::Key(_) if !output.is_object() => {
                 bail!("Can't access key of non object value");
             }
-            Token::Key(key) => {
+            Token::Key(key) | Token::OptionalKey(key) => {
                 output = output.get(key).unwrap_or(&Value::Null);
             }
-            Token::OptionalKey(_) => todo!(),
             Token::Iterator => todo!(),
         }
     }
@@ -138,5 +136,29 @@ mod tests {
         let tokens = vec![Token::Key("key"), Token::Index(0)];
 
         assert_eq!(apply_tokens(&input, &tokens).unwrap(), 1);
+    }
+
+    #[test]
+    fn apply_optional_index_to_non_array() {
+        let tokens = vec![Token::OptionalIndex(1)];
+
+        let input = json!("1");
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        let input = json!(1);
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        let input = json!({"hello": "world"});
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn apply_optional_key_to_non_object() {
+        let tokens = vec![Token::OptionalKey("hello")];
+
+        let input = json!("1");
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        let input = json!(1);
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+        let input = json!([1, 2, 3, 4]);
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
     }
 }
