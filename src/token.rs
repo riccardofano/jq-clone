@@ -24,7 +24,12 @@ fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Value> {
                 output = output.get(index).unwrap_or(&Value::Null);
             }
             Token::OptionalIndex(_) => todo!(),
-            Token::Key(_) => todo!(),
+            Token::Key(_) if !output.is_object() => {
+                bail!("Can't access key of non object value");
+            }
+            Token::Key(key) => {
+                output = output.get(key).unwrap_or(&Value::Null);
+            }
             Token::OptionalKey(_) => todo!(),
             Token::Iterator => todo!(),
         }
@@ -89,5 +94,49 @@ mod tests {
         let tokens = vec![Token::Index(1), Token::Identity, Token::Index(0)];
 
         assert_eq!(apply_tokens(&input, &tokens).unwrap(), 4);
+    }
+
+    #[test]
+    fn apply_key_to_object() {
+        let input = json!({"hello": "world"});
+        let tokens = vec![Token::Key("hello")];
+
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), "world");
+    }
+
+    #[test]
+    fn apply_non_existent_key_to_object() {
+        let input = json!({"hello": "world"});
+        let tokens = vec![Token::Key("missing")];
+
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), Value::Null);
+    }
+
+    #[test]
+    fn apply_key_to_non_object() {
+        let tokens = vec![Token::Key("hello")];
+
+        let input = json!("1");
+        assert!(apply_tokens(&input, &tokens).is_err());
+        let input = json!(1);
+        assert!(apply_tokens(&input, &tokens).is_err());
+        let input = json!([1, 2, 3, 4]);
+        assert!(apply_tokens(&input, &tokens).is_err());
+    }
+
+    #[test]
+    fn apply_key_to_object_chained() {
+        let input = json!({"hello": {"world": 42}});
+        let tokens = vec![Token::Key("hello"), Token::Key("world")];
+
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 42);
+    }
+
+    #[test]
+    fn apply_chain_key_and_index_access() {
+        let input = json!({"key": [1,2,3]});
+        let tokens = vec![Token::Key("key"), Token::Index(0)];
+
+        assert_eq!(apply_tokens(&input, &tokens).unwrap(), 1);
     }
 }
