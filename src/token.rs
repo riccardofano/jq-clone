@@ -5,10 +5,14 @@ use serde_json::Value;
 pub enum Token<'a> {
     Identity,
     Index(usize),
-    Key(&'a str),
     OptionalIndex(usize),
+    IterateIndex(usize),
+    IterateOptionalIndex(usize),
+    Key(&'a str),
     OptionalKey(&'a str),
-    Iterator,
+    IterateKey(&'a str),
+    IterateOptionalKey(&'a str),
+    Iterate,
     Array(Vec<Token<'a>>),
 }
 
@@ -24,43 +28,57 @@ pub fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Outpu
     for (i, token) in tokens.iter().enumerate() {
         match token {
             Token::Identity => {}
-            Token::Index(_) if !output.is_array() => {
+            Token::Index(_) | Token::IterateIndex(_) if !output.is_array() => {
                 bail!("Can't index into non array value");
             }
             Token::Index(index) | Token::OptionalIndex(index) => {
                 output = output.get(index).unwrap_or(&Value::Null);
             }
-            Token::Key(_) if !output.is_object() => {
+            Token::Key(_) | Token::IterateKey(_) if !output.is_object() => {
                 bail!("Can't access key of non object value");
             }
             Token::Key(key) | Token::OptionalKey(key) => {
                 output = output.get(key).unwrap_or(&Value::Null);
             }
-            Token::Iterator => match output {
-                Value::Array(array) => {
-                    let transformed = array
-                        .iter()
-                        .map(|v| apply_tokens(v, &tokens[i + 1..]))
-                        .collect::<Result<Vec<Output>, _>>()?;
-
-                    return Ok(Output::Multiple(transformed));
-                }
-                Value::Object(map) => {
-                    let transformed = map
-                        .into_iter()
-                        .map(|(_, v)| apply_tokens(v, &tokens[i + 1..]))
-                        .collect::<Result<Vec<Output>, _>>()?;
-
-                    return Ok(Output::Multiple(transformed));
-                }
-                // NOTE(riki): In jq this would be an error but I like it like this
-                _ => return Ok(Output::Single(output.to_owned())),
-            },
+            Token::IterateIndex(index) | Token::IterateOptionalIndex(index) => {
+                output = output.get(index).unwrap_or(&Value::Null);
+                return iterate(output, &tokens[i + 1..]);
+            }
+            Token::IterateKey(key) | Token::IterateOptionalKey(key) => {
+                dbg!(output);
+                output = output.get(key).unwrap_or(&Value::Null);
+                dbg!(output);
+                return iterate(output, &tokens[i + 1..]);
+            }
+            Token::Iterate => return iterate(output, &tokens[i + 1..]),
             Token::Array(_) => todo!(),
         }
     }
 
     Ok(Output::Single(output.to_owned()))
+}
+
+fn iterate(input: &Value, next_tokens: &[Token<'_>]) -> anyhow::Result<Output> {
+    match input {
+        Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+            bail!("Cannot iterate on primitive values")
+        }
+        Value::Array(array) => {
+            let transformed = array
+                .iter()
+                .map(|v| apply_tokens(v, next_tokens))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Output::Multiple(transformed))
+        }
+        Value::Object(map) => {
+            let transformed = map
+                .into_iter()
+                .map(|(_, v)| apply_tokens(v, next_tokens))
+                .collect::<Result<Vec<Output>, _>>()?;
+
+            Ok(Output::Multiple(transformed))
+        }
+    }
 }
 
 pub fn token_output_to_string(output: Output) -> anyhow::Result<String> {
@@ -257,7 +275,7 @@ mod tests {
 
     #[test]
     fn apply_iterator() {
-        let tokens = vec![Token::Iterator];
+        let tokens = vec![Token::Iterate];
 
         let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
         let res = apply_tokens(&input, &tokens).unwrap();
@@ -273,7 +291,7 @@ mod tests {
 
     #[test]
     fn apply_iterator_chained() {
-        let tokens = vec![Token::Iterator, Token::Iterator];
+        let tokens = vec![Token::Iterate, Token::Iterate];
 
         let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
         let res = apply_tokens(&input, &tokens).unwrap();
@@ -297,31 +315,18 @@ mod tests {
 
     #[test]
     fn apply_iterator_chained_twice() {
-        let tokens = vec![Token::Iterator, Token::Iterator, Token::Iterator];
+        let tokens = vec![Token::Iterate, Token::Iterate, Token::Iterate];
 
         let input = json!([[1, [2, 3]], [4, [5, 6]], [7, [8, 9]]]);
-        let res = apply_tokens(&input, &tokens).unwrap();
+        let res = apply_tokens(&input, &tokens);
 
-        let expected = Output::Multiple(vec![
-            Output::Multiple(vec![
-                Output::Single(json!(1)),
-                Output::Multiple(vec![Output::Single(json!(2)), Output::Single(json!(3))]),
-            ]),
-            Output::Multiple(vec![
-                Output::Single(json!(4)),
-                Output::Multiple(vec![Output::Single(json!(5)), Output::Single(json!(6))]),
-            ]),
-            Output::Multiple(vec![
-                Output::Single(json!(7)),
-                Output::Multiple(vec![Output::Single(json!(8)), Output::Single(json!(9))]),
-            ]),
-        ]);
-        assert_eq!(res, expected);
+        // NOTE: jq doesn't allow iterating over primitive values
+        assert!(res.is_err());
     }
 
     #[test]
     fn apply_iterator_on_object() {
-        let tokens = vec![Token::Iterator];
+        let tokens = vec![Token::Iterate];
 
         let input = json!({"hello": "a", "world": "b"});
         let res = apply_tokens(&input, &tokens).unwrap();
@@ -334,7 +339,7 @@ mod tests {
 
     #[test]
     fn apply_iterator_on_array_in_object() {
-        let tokens = vec![Token::Iterator, Token::Iterator];
+        let tokens = vec![Token::Iterate, Token::Iterate];
 
         let input = json!({"hello": ["a", "b"], "world": ["c"]});
         let res = apply_tokens(&input, &tokens).unwrap();

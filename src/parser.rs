@@ -8,17 +8,14 @@ use crate::token::Token;
 pub fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {any;
         '.' => alt((
-            terminated(parse_key, '?').map(Token::OptionalKey),
-            parse_key.map(Token::Key),
+            parse_key_token,
+            "[]".value(Token::Iterate),
             "".value(Token::Identity)
         )),
         '[' => alt((
-            terminated(parse_index, '?').map(Token::OptionalIndex),
-            parse_index.map(Token::Index),
-            terminated(parse_key_string, '?').map(Token::OptionalKey) ,
-            parse_key_string.map(Token::Key),
+            parse_index_token,
+            parse_key_string_token,
             parse_array_wrapper.map(Token::Array),
-            "]".value(Token::Iterator),
         )),
         _ => fail
     }
@@ -31,8 +28,28 @@ fn parse_index(input: &mut &str) -> PResult<usize> {
         .parse_next(input)
 }
 
+fn parse_index_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
+    alt((
+        terminated(terminated(parse_index, "[]"), '?').map(Token::IterateOptionalIndex),
+        terminated(parse_index, "[]").map(Token::IterateIndex),
+        terminated(parse_index, '?').map(Token::OptionalIndex),
+        parse_index.map(Token::Index),
+    ))
+    .parse_next(input)
+}
+
 fn parse_key_string<'a>(input: &mut &'a str) -> PResult<&'a str> {
     terminated(delimited('"', parse_key, '"'), ']').parse_next(input)
+}
+
+fn parse_key_string_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
+    alt((
+        terminated(terminated(parse_key_string, "[]"), '?').map(Token::IterateOptionalKey),
+        terminated(parse_key_string, "[]").map(Token::IterateKey),
+        terminated(parse_key_string, '?').map(Token::OptionalKey),
+        parse_key_string.map(Token::Key),
+    ))
+    .parse_next(input)
 }
 
 fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
@@ -41,9 +58,18 @@ fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
         .parse_next(input)
 }
 
-// TODO: This doesn't parse nested wrapped arrays correctly
+fn parse_key_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
+    alt((
+        terminated(terminated(parse_key, "[]"), '?').map(Token::IterateOptionalKey),
+        terminated(parse_key, "[]").map(Token::IterateKey),
+        terminated(parse_key, '?').map(Token::OptionalKey),
+        parse_key.map(Token::Key),
+    ))
+    .parse_next(input)
+}
+
 fn parse_array_wrapper<'a>(input: &mut &'a str) -> PResult<Vec<Token<'a>>> {
-    terminated(repeat(1.., parse_token), ']').parse_next(input)
+    terminated(repeat(0.., parse_token), ']').parse_next(input)
 }
 
 #[cfg(test)]
@@ -211,14 +237,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_key_dot_notation_stops_at_open_bracket() {
-        let mut input = ".quote[]";
-        let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Key("quote"));
-        assert_eq!(input, "[]");
-    }
-
-    #[test]
     fn parse_key_dot_notation_stops_at_dot() {
         let mut input = ".quote.quote";
         let output = parse_token.parse_next(&mut input).unwrap();
@@ -255,10 +273,7 @@ mod tests {
     fn parse_iterator_token() {
         let mut input = ".quote[]";
         let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Key("quote"));
-
-        let output = parse_token.parse_next(&mut input).unwrap();
-        assert_eq!(output, Token::Iterator);
+        assert_eq!(output, Token::IterateKey("quote"));
         assert!(input.is_empty());
     }
 
@@ -285,7 +300,15 @@ mod tests {
 
         assert_eq!(
             output.unwrap(),
-            Token::Array(vec![Token::Key("quotes"), Token::Iterator])
+            Token::Array(vec![Token::IterateKey("quotes")])
         );
+    }
+
+    #[test]
+    fn parse_array_wrapper_in_array_wrapper() {
+        let mut input = "[[]]";
+        let output = parse_token.parse_next(&mut input);
+
+        assert_eq!(output.unwrap(), Token::Array(vec![Token::Array(vec![])]));
     }
 }
