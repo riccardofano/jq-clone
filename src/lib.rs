@@ -1,4 +1,4 @@
-use anyhow::ensure;
+use anyhow::{ensure, Context};
 use serde_json::Value;
 use winnow::combinator::iterator;
 
@@ -8,7 +8,7 @@ mod parser;
 mod token;
 
 pub fn apply_filter(input: &str, filter: Option<&str>) -> anyhow::Result<String> {
-    let json: Value = serde_json::from_str(input)?;
+    let json: Value = serde_json::from_str(input).context("Failed to parse JSON")?;
 
     let filter = filter.unwrap_or(".");
     let mut it = iterator(filter, parse_token);

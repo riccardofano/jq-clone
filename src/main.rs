@@ -1,4 +1,4 @@
-use std::io::{stdin, BufRead};
+use std::io::{stdin, Read};
 
 use jq_clone::apply_filter;
 
@@ -8,10 +8,11 @@ fn main() {
     let mut buf = String::new();
     let _ = stdin()
         .lock()
-        .read_line(&mut buf)
+        .read_to_string(&mut buf)
         .expect("Could not read stdin");
 
-    let pretty_string = apply_filter(&buf, filter.as_deref()).expect("Could apply filter");
-
-    println!("{pretty_string}");
+    match apply_filter(&buf, filter.as_deref()) {
+        Ok(string) => println!("{string}"),
+        Err(e) => eprintln!("Failed to apply filters: {e:?}"),
+    }
 }

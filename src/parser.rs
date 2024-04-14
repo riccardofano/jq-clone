@@ -13,11 +13,11 @@ pub fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
             "".value(Token::Identity)
         )),
         '[' => alt((
-            parse_array_wrapper.map(Token::Array),
             terminated(parse_index, '?').map(Token::OptionalIndex),
             parse_index.map(Token::Index),
             terminated(parse_key_string, '?').map(Token::OptionalKey) ,
             parse_key_string.map(Token::Key),
+            parse_array_wrapper.map(Token::Array),
             "]".value(Token::Iterator),
         )),
         _ => fail
