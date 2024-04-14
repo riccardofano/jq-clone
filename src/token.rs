@@ -1,8 +1,8 @@
-use anyhow::{bail, Context};
+use anyhow::bail;
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Token<'a> {
+pub enum Token<'a> {
     Identity,
     Index(usize),
     Key(&'a str),
@@ -12,12 +12,12 @@ pub(crate) enum Token<'a> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Output {
+pub enum Output {
     Single(Value),
     Multiple(Vec<Output>),
 }
 
-fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Output> {
+pub fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Output> {
     let mut output = input;
 
     for (i, token) in tokens.iter().enumerate() {
@@ -61,7 +61,20 @@ fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Output> {
     Ok(Output::Single(output.to_owned()))
 }
 
-fn print_output(output: Output) {
+pub fn token_output_to_string(output: Output) -> anyhow::Result<String> {
+    let string = match output {
+        Output::Single(value) => serde_json::to_string_pretty(&value)?,
+        Output::Multiple(values) => values
+            .into_iter()
+            .map(token_output_to_string)
+            .collect::<Result<Vec<_>, _>>()?
+            .join("\n"),
+    };
+
+    Ok(string)
+}
+
+pub fn print_output(output: Output) {
     match output {
         Output::Single(v) => println!("{v}"),
         Output::Multiple(values) => values.into_iter().for_each(print_output),

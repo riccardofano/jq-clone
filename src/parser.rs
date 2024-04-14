@@ -5,7 +5,7 @@ use winnow::{PResult, Parser};
 
 use crate::token::Token;
 
-fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
+pub fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {any;
         '.' => alt((
             terminated(parse_key, '?').map(Token::OptionalKey),
