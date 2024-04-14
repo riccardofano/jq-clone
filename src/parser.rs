@@ -3,15 +3,7 @@ use winnow::combinator::{alt, delimited, dispatch, fail, terminated};
 use winnow::token::{any, take_till};
 use winnow::{PResult, Parser};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Token<'a> {
-    Identity,
-    Index(usize),
-    Key(&'a str),
-    OptionalIndex(usize),
-    OptionalKey(&'a str),
-    Iterator,
-}
+use crate::token::Token;
 
 fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
     dispatch! {any;
