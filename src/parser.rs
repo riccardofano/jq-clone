@@ -1,5 +1,5 @@
 use winnow::ascii::digit1;
-use winnow::combinator::{alt, delimited, dispatch, fail, terminated};
+use winnow::combinator::{alt, delimited, dispatch, fail, repeat, terminated};
 use winnow::token::{any, take_till};
 use winnow::{PResult, Parser};
 
@@ -13,11 +13,12 @@ pub fn parse_token<'a>(input: &mut &'a str) -> PResult<Token<'a>> {
             "".value(Token::Identity)
         )),
         '[' => alt((
+            parse_array_wrapper.map(Token::Array),
             terminated(parse_index, '?').map(Token::OptionalIndex),
             parse_index.map(Token::Index),
             terminated(parse_key_string, '?').map(Token::OptionalKey) ,
             parse_key_string.map(Token::Key),
-            "]".value(Token::Iterator)
+            "]".value(Token::Iterator),
         )),
         _ => fail
     }
@@ -35,9 +36,14 @@ fn parse_key_string<'a>(input: &mut &'a str) -> PResult<&'a str> {
 }
 
 fn parse_key<'a>(input: &mut &'a str) -> PResult<&'a str> {
-    take_till(1.., |c: char| c == '.' || c == '[' || c == '"' || c == '?')
+    take_till(1.., ['.', '[', ']', '"', '?'])
         .recognize()
         .parse_next(input)
+}
+
+// TODO: This doesn't parse nested wrapped arrays correctly
+fn parse_array_wrapper<'a>(input: &mut &'a str) -> PResult<Vec<Token<'a>>> {
+    terminated(repeat(1.., parse_token), ']').parse_next(input)
 }
 
 #[cfg(test)]
@@ -254,5 +260,32 @@ mod tests {
         let output = parse_token.parse_next(&mut input).unwrap();
         assert_eq!(output, Token::Iterator);
         assert!(input.is_empty());
+    }
+
+    #[test]
+    fn parse_tokens_wrapped_in_array() {
+        let mut input = "[.]";
+        let output = parse_token.parse_next(&mut input);
+
+        assert_eq!(output.unwrap(), Token::Array(vec![Token::Identity]));
+    }
+
+    #[test]
+    fn parse_key_wrapped_in_array() {
+        let mut input = "[.quote]";
+        let output = parse_token.parse_next(&mut input);
+
+        assert_eq!(output.unwrap(), Token::Array(vec![Token::Key("quote")]));
+    }
+
+    #[test]
+    fn parse_key_iterator_wrapped_in_array() {
+        let mut input = "[.quotes[]]";
+        let output = parse_token.parse_next(&mut input);
+
+        assert_eq!(
+            output.unwrap(),
+            Token::Array(vec![Token::Key("quotes"), Token::Iterator])
+        );
     }
 }

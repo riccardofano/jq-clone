@@ -9,6 +9,7 @@ pub enum Token<'a> {
     OptionalIndex(usize),
     OptionalKey(&'a str),
     Iterator,
+    Array(Vec<Token<'a>>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,6 +56,7 @@ pub fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Outpu
                 // NOTE(riki): In jq this would be an error but I like it like this
                 _ => return Ok(Output::Single(output.to_owned())),
             },
+            Token::Array(_) => todo!(),
         }
     }
 
