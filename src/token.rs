@@ -44,7 +44,15 @@ fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Output> {
 
                     return Ok(Output::Multiple(transformed));
                 }
-                Value::Object(_) => todo!(),
+                Value::Object(map) => {
+                    let transformed = map
+                        .into_iter()
+                        .map(|(_, v)| apply_tokens(v, &tokens[i + 1..]))
+                        .collect::<Result<Vec<Output>, _>>()?;
+
+                    return Ok(Output::Multiple(transformed));
+                }
+                // NOTE(riki): In jq this would be an error but I like it like this
                 _ => return Ok(Output::Single(output.to_owned())),
             },
         }
@@ -292,6 +300,34 @@ mod tests {
                 Output::Multiple(vec![Output::Single(json!(8)), Output::Single(json!(9))]),
             ]),
         ]);
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn apply_iterator_on_object() {
+        let tokens = vec![Token::Iterator];
+
+        let input = json!({"hello": "a", "world": "b"});
+        let res = apply_tokens(&input, &tokens).unwrap();
+
+        let expected =
+            Output::Multiple(vec![Output::Single(json!("a")), Output::Single(json!("b"))]);
+
+        assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn apply_iterator_on_array_in_object() {
+        let tokens = vec![Token::Iterator, Token::Iterator];
+
+        let input = json!({"hello": ["a", "b"], "world": ["c"]});
+        let res = apply_tokens(&input, &tokens).unwrap();
+
+        let expected = Output::Multiple(vec![
+            Output::Multiple(vec![Output::Single(json!("a")), Output::Single(json!("b"))]),
+            Output::Multiple(vec![Output::Single(json!("c"))]),
+        ]);
+
         assert_eq!(res, expected);
     }
 }
