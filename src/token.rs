@@ -1,5 +1,5 @@
 use anyhow::bail;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token<'a> {
@@ -45,17 +45,32 @@ pub fn apply_tokens(input: &Value, tokens: &[Token<'_>]) -> anyhow::Result<Outpu
                 return iterate(output, &tokens[i + 1..]);
             }
             Token::IterateKey(key) | Token::IterateOptionalKey(key) => {
-                dbg!(output);
                 output = output.get(key).unwrap_or(&Value::Null);
-                dbg!(output);
                 return iterate(output, &tokens[i + 1..]);
             }
             Token::Iterate => return iterate(output, &tokens[i + 1..]),
-            Token::Array(_) => todo!(),
+            Token::Array(array) => {
+                let applied = apply_tokens(output, array)?;
+                let wrapped = match applied {
+                    Output::Single(value) => json!([value]),
+                    Output::Multiple(values) => {
+                        values.into_iter().map(unwrap_output).collect::<Value>()
+                    }
+                };
+
+                return apply_tokens(&wrapped, &tokens[i + 1..]);
+            }
         }
     }
 
     Ok(Output::Single(output.to_owned()))
+}
+
+fn unwrap_output(output: Output) -> Value {
+    match output {
+        Output::Single(value) => value,
+        Output::Multiple(values) => values.into_iter().map(unwrap_output).collect::<Value>(),
+    }
 }
 
 fn iterate(input: &Value, next_tokens: &[Token<'_>]) -> anyhow::Result<Output> {
@@ -350,5 +365,38 @@ mod tests {
         ]);
 
         assert_eq!(res, expected);
+    }
+
+    #[test]
+    fn apply_wrap_in_array() {
+        let tokens = vec![Token::Array(vec![Token::Key("hello")])];
+        let input = json!({"hello": "a"});
+
+        let res = apply_tokens(&input, &tokens);
+        let expected = Output::Single(json!(["a"]));
+
+        assert_eq!(res.unwrap(), expected)
+    }
+
+    #[test]
+    fn apply_wrap_in_array_multiple_values() {
+        let tokens = vec![Token::Array(vec![Token::IterateKey("hello")])];
+        let input = json!({"hello": ["a","b", "c"]});
+
+        let res = apply_tokens(&input, &tokens);
+        let expected = Output::Single(json!(["a", "b", "c"]));
+
+        assert_eq!(res.unwrap(), expected)
+    }
+
+    #[test]
+    fn apply_wrap_array_in_array() {
+        let tokens = vec![Token::Array(vec![Token::Key("hello")])];
+        let input = json!({"hello": ["a","b", "c"]});
+
+        let res = apply_tokens(&input, &tokens);
+        let expected = Output::Single(json!([["a", "b", "c"]]));
+
+        assert_eq!(res.unwrap(), expected)
     }
 }
